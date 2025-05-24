@@ -1,43 +1,41 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"function/models"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"io"
 	"log"
+	"net/http"
 	"os"
-	"strconv"
-	"strings"
-	"time"
 )
 
 const (
-	getBookMarksPath   = "GET /rb/bookmarks"
-	createBookmarkPath = "POST /rb/bookmarks"
-	deleteBookmarkPath = "DELETE /rb/bookmarks/{examId}/{questionId}"
+	getMetadataPath = "GET /rb/metadata"
 )
 
-var bookmarksTableName string
+var (
+	metadataBucketName string
+	metadataFileKey    string
 
-var dbClient *dynamodb.Client
+	s3Client *s3.Client
+)
 
 func init() {
-	bookmarksTableName = os.Getenv("BOOKMARKS_TABLE_NAME")
+	metadataBucketName = os.Getenv("METADATA_BUCKET_NAME")
+	metadataFileKey = os.Getenv("METADATA_FILE_KEY")
 
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		panic(err)
 	}
 
-	dbClient = dynamodb.NewFromConfig(cfg)
+	s3Client = s3.NewFromConfig(cfg)
 }
 
 func handler(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -45,142 +43,50 @@ func handler(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPRes
 
 	return func() (events.APIGatewayV2HTTPResponse, error) {
 		switch path {
-		case getBookMarksPath:
-			return getBookmarks(request)
-		case createBookmarkPath:
-			return createBookmark(request)
-		case deleteBookmarkPath:
-			return deleteBookmark(request)
+		case getMetadataPath:
+			return getMetadata()
 		default:
 			return events.APIGatewayV2HTTPResponse{
 				Body:       "Path Not Found",
-				StatusCode: 404,
+				StatusCode: http.StatusNotFound,
 			}, nil
 		}
 	}()
 }
 
-func getBookmarks(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	queryParams := request.QueryStringParameters
-	examId, ext := queryParams["examId"]
-
-	userId, _ := request.RequestContext.Authorizer.JWT.Claims["sub"]
-
-	builder := expression.Key("user_id").Equal(expression.Value(userId))
-	if ext {
-		builder = builder.And(expression.Key("exam_question_key").BeginsWith(examId))
-	}
-	expr, _ := expression.NewBuilder().WithKeyCondition(builder).Build()
-
-	input := &dynamodb.QueryInput{
-		TableName:                 aws.String(bookmarksTableName),
-		KeyConditionExpression:    expr.KeyCondition(),
-		ExpressionAttributeNames:  expr.Names(),
-		ExpressionAttributeValues: expr.Values(),
-	}
-
-	result, err := dbClient.Query(context.TODO(), input)
+func getMetadata() (events.APIGatewayV2HTTPResponse, error) {
+	metadata, err := s3Client.GetObject(context.TODO(), &s3.GetObjectInput{
+		Bucket: aws.String(metadataBucketName),
+		Key:    aws.String(metadataFileKey),
+	})
 	if err != nil {
-		log.Println(fmt.Sprintf("Error getting bookmarks for %s, %v", userId, err))
+		log.Println(fmt.Sprintf("Error getting object from S3: %v", err))
 		return events.APIGatewayV2HTTPResponse{
-			Body:       "Error getting bookmarks",
-			StatusCode: 500,
+			Body:       "Error getting metadata",
+			StatusCode: http.StatusInternalServerError,
 		}, nil
 	}
 
-	bookmarks := make(map[string][]int)
-	for _, item := range result.Items {
-		parts := strings.Split(item["exam_question_key"].(*types.AttributeValueMemberS).Value, "#")
-		idx, err := strconv.Atoi(parts[1])
-		if err != nil {
-			continue
+	defer func() {
+		if err := metadata.Body.Close(); err != nil {
+			log.Printf("error closing S3 body: %v", err)
 		}
+	}()
 
-		bookmarks[parts[0]] = append(bookmarks[parts[0]], idx)
-	}
-
-	response, _ := json.Marshal(models.GetBookmarksResponse{
-		Bookmarks: bookmarks,
-	})
-
-	return events.APIGatewayV2HTTPResponse{
-		Body:       string(response),
-		StatusCode: 200,
-	}, nil
-}
-
-func createBookmark(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	userId, _ := request.RequestContext.Authorizer.JWT.Claims["sub"]
-
-	body := make(map[string]interface{})
-	err := json.Unmarshal([]byte(request.Body), &body)
+	buf := new(bytes.Buffer)
+	_, err = io.Copy(buf, metadata.Body)
 	if err != nil {
-		log.Println(fmt.Sprintf("Error creating bookmark for %s, %v", userId, err))
+		log.Println(fmt.Sprintf("Error reading S3 content: %v", err))
 		return events.APIGatewayV2HTTPResponse{
-			Body:       "Error creating bookmark",
-			StatusCode: 400,
-		}, nil
-	}
-
-	examId := body["examId"].(string)
-	questionId := int64(body["questionId"].(float64))
-
-	item := map[string]types.AttributeValue{
-		"user_id": &types.AttributeValueMemberS{Value: userId},
-		"exam_question_key": &types.AttributeValueMemberS{
-			Value: fmt.Sprintf("%s#%d", examId, questionId),
-		},
-		"created_at": &types.AttributeValueMemberS{
-			Value: time.Now().UTC().Format(time.RFC3339),
-		},
-	}
-
-	_, err = dbClient.PutItem(context.TODO(), &dynamodb.PutItemInput{
-		TableName: aws.String(bookmarksTableName),
-		Item:      item,
-	})
-
-	if err != nil {
-		log.Println(fmt.Sprintf("Error creating bookmark for %s, %v", userId, err))
-		return events.APIGatewayV2HTTPResponse{
-			Body:       "Error creating bookmark",
-			StatusCode: 500,
+			StatusCode: http.StatusInternalServerError,
+			Body:       "Error getting metadata",
 		}, nil
 	}
 
 	return events.APIGatewayV2HTTPResponse{
-		StatusCode: 201,
-	}, nil
-}
-
-func deleteBookmark(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	userId, _ := request.RequestContext.Authorizer.JWT.Claims["sub"]
-
-	examId := request.PathParameters["examId"]
-	questionId := request.PathParameters["questionId"]
-
-	key := map[string]types.AttributeValue{
-		"user_id": &types.AttributeValueMemberS{Value: userId},
-		"exam_question_key": &types.AttributeValueMemberS{
-			Value: fmt.Sprintf("%s#%s", examId, questionId),
-		},
-	}
-
-	_, err := dbClient.DeleteItem(context.TODO(), &dynamodb.DeleteItemInput{
-		TableName: aws.String(bookmarksTableName),
-		Key:       key,
-	})
-
-	if err != nil {
-		log.Println(fmt.Sprintf("Error deleting bookmark for %s, %v", userId, err))
-		return events.APIGatewayV2HTTPResponse{
-			Body:       "Error deleting bookmark",
-			StatusCode: 500,
-		}, nil
-	}
-
-	return events.APIGatewayV2HTTPResponse{
-		StatusCode: 200,
+		StatusCode: http.StatusOK,
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		Body:       buf.String(),
 	}, nil
 }
 
