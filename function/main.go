@@ -128,7 +128,7 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	if updated {
-		jsonBytes, err := json.MarshalIndent(metadataResp.Metadata, "", "  ")
+		jsonBytes, err := json.MarshalIndent(metadataResp, "", "  ")
 		if err != nil {
 			log.Println(fmt.Sprintf("Error parsing json: %v", err))
 			return events.APIGatewayV2HTTPResponse{
