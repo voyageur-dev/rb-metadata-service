@@ -119,8 +119,9 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	updated := false
-	for _, item := range metadataResp.Metadata {
-		if count, ext := counts[item.ExamId]; ext && item.QuestionCount != count {
+	for i := range metadataResp.Metadata {
+		item := &metadataResp.Metadata[i]
+		if count, exists := counts[item.ExamId]; exists && item.QuestionCount != count {
 			item.QuestionCount = count
 			updated = true
 		}
