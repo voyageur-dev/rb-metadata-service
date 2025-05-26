@@ -110,7 +110,6 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	counts, err := getCountsFromService(examIds)
-	fmt.Println("source", counts)
 	if err != nil {
 		log.Println(fmt.Sprintf("Error getting count from rb-question-service: %v", err))
 		return events.APIGatewayV2HTTPResponse{
@@ -206,15 +205,13 @@ func getCountsFromService(examIds []string) (map[string]int, error) {
 		return map[string]int{}, err
 	}
 
-	fmt.Println("payloadmap", respPayloadMap)
-
-	var counts map[string]int
-	err = json.Unmarshal([]byte(respPayloadMap["body"].(string)), &counts)
+	var respBodyMap map[string]interface{}
+	err = json.Unmarshal([]byte(respPayloadMap["body"].(string)), &respBodyMap)
 	if err != nil {
 		return map[string]int{}, err
 	}
 
-	return counts, nil
+	return respPayloadMap["count"].(map[string]int), nil
 }
 
 func main() {
