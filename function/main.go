@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"function/models"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -179,30 +180,31 @@ func getMetadataFromS3() (bytes.Buffer, error) {
 }
 
 func getCountsFromService(examIds []string) (map[string]int, error) {
-	payload := []byte(fmt.Sprintf("{\"routeKey\": \"POST /rb/questions/count\", \"body\": \"%s\"}", strings.Join(examIds, ",")))
+	payload := map[string]string{
+		"routeKey": "POST /rb/questions/count",
+		"body":     strings.Join(examIds, ","),
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return map[string]int{}, err
+	}
 
 	resp, err := lambdaClient.Invoke(context.TODO(), &lambdaSDK.InvokeInput{
 		FunctionName:   aws.String(questionServiceArn),
 		InvocationType: "RequestResponse",
-		Payload:        payload,
+		Payload:        payloadBytes,
 	})
 	if err != nil {
 		return map[string]int{}, err
 	}
 
-	var respPayload events.APIGatewayV2HTTPResponse
-	err = json.Unmarshal(resp.Payload, &respPayload)
+	var getCountResponse models.GetCountResponse
+	err = json.Unmarshal(resp.Payload, &getCountResponse)
 	if err != nil {
 		return map[string]int{}, err
 	}
 
-	var respBody map[string]interface{}
-	err = json.Unmarshal([]byte(respPayload.Body), &respBody)
-	if err != nil {
-		return map[string]int{}, err
-	}
-
-	return respBody["count"].(map[string]int), nil
+	return getCountResponse.Payload.Body.Count, nil
 }
 
 func main() {
