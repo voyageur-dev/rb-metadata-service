@@ -101,10 +101,10 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 		}, nil
 	}
 
-	metadata := metadataResp["metadata"].([]map[string]interface{})
+	metadata := metadataResp["metadata"].([]interface{})
 	var examIds []string
 	for _, item := range metadata {
-		examIds = append(examIds, item["examId"].(string))
+		examIds = append(examIds, item.(map[string]interface{})["examId"].(string))
 	}
 
 	counts, err := getCountsFromService(examIds)
@@ -118,8 +118,8 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 
 	updated := false
 	for _, item := range metadata {
-		if item["questionCount"] != counts[item["examId"].(string)] {
-			item["questionCount"] = counts[item["examId"].(string)]
+		if item.(map[string]interface{})["questionCount"] != counts[item.(map[string]interface{})["examId"].(string)] {
+			item.(map[string]interface{})["questionCount"] = counts[item.(map[string]interface{})["examId"].(string)]
 			updated = true
 		}
 	}
