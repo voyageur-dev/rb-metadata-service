@@ -211,6 +211,9 @@ func getCountsFromService(examIds []string) (map[string]int, error) {
 		return map[string]int{}, err
 	}
 
+	fmt.Println(respBodyMap)
+	fmt.Println(respBodyMap["count"])
+
 	return respBodyMap["count"].(map[string]int), nil
 }
 
