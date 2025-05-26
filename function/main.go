@@ -22,6 +22,8 @@ import (
 const (
 	getMetadataPath    = "GET /rb/metadata"
 	updateMetadataPath = "PUT /rb/metadata"
+
+	getQuestionCountPath = "POST /rb/questions/count"
 )
 
 var (
@@ -103,12 +105,14 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	metadata := metadataResp["metadata"].([]interface{})
+	fmt.Println("current", metadata)
 	var examIds []string
 	for _, item := range metadata {
 		examIds = append(examIds, item.(map[string]interface{})["examId"].(string))
 	}
 
 	counts, err := getCountsFromService(examIds)
+	fmt.Println("source", counts)
 	if err != nil {
 		log.Println(fmt.Sprintf("Error getting count from rb-question-service: %v", err))
 		return events.APIGatewayV2HTTPResponse{
@@ -181,7 +185,7 @@ func getMetadataFromS3() (bytes.Buffer, error) {
 
 func getCountsFromService(examIds []string) (map[string]int, error) {
 	payload := map[string]string{
-		"routeKey": "POST /rb/questions/count",
+		"routeKey": getQuestionCountPath,
 		"body":     strings.Join(examIds, ","),
 	}
 	payloadBytes, err := json.Marshal(payload)
