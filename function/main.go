@@ -202,13 +202,13 @@ func getCountsFromService(examIds []string) (map[string]int, error) {
 		return map[string]int{}, err
 	}
 
-	var getCountResponse models.GetCountResponse
-	err = json.Unmarshal(resp.Payload, &getCountResponse)
+	var respPayload models.GetCountResponsePayload
+	err = json.Unmarshal(resp.Payload, &respPayload)
 	if err != nil {
 		return map[string]int{}, err
 	}
 
-	return getCountResponse.Payload.Body.Count, nil
+	return respPayload.Body.Count, nil
 }
 
 func main() {
