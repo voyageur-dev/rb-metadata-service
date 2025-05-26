@@ -211,7 +211,7 @@ func getCountsFromService(examIds []string) (map[string]int, error) {
 		return map[string]int{}, err
 	}
 
-	return respPayloadMap["count"].(map[string]int), nil
+	return respBodyMap["count"].(map[string]int), nil
 }
 
 func main() {
