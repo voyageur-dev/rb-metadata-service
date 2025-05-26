@@ -200,15 +200,21 @@ func getCountsFromService(examIds []string) (map[string]int, error) {
 		return map[string]int{}, err
 	}
 
-	fmt.Println("resp", resp)
-
-	var respPayload models.GetCountResponsePayload
-	err = json.Unmarshal(resp.Payload, &respPayload)
+	var respPayloadMap map[string]interface{}
+	err = json.Unmarshal(resp.Payload, &respPayloadMap)
 	if err != nil {
 		return map[string]int{}, err
 	}
 
-	return respPayload.Body.Count, nil
+	fmt.Println("payloadmap", respPayloadMap)
+
+	var counts map[string]int
+	err = json.Unmarshal([]byte(respPayloadMap["body"].(string)), &counts)
+	if err != nil {
+		return map[string]int{}, err
+	}
+
+	return counts, nil
 }
 
 func main() {
