@@ -85,6 +85,8 @@ func getMetadata() (events.APIGatewayV2HTTPResponse, error) {
 }
 
 func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
+	fmt.Println("Update Metadata Begin")
+
 	buf, err := getMetadataFromS3()
 	if err != nil {
 		log.Println(fmt.Sprintf("Error getting metadata: %v", err))
@@ -124,6 +126,7 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 		if count, exists := counts[item.ExamId]; exists && item.QuestionCount != count {
 			item.QuestionCount = count
 			updated = true
+			fmt.Println(fmt.Sprintf("updating question count from %d to %d", item.QuestionCount, count))
 		}
 	}
 
@@ -151,6 +154,8 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 			}, nil
 		}
 	}
+
+	fmt.Println("Update Metadata End")
 
 	return events.APIGatewayV2HTTPResponse{
 		StatusCode: http.StatusOK,
