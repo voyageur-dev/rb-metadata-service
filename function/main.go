@@ -94,7 +94,7 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 		}, nil
 	}
 
-	var metadataResp map[string]interface{}
+	var metadataResp models.GetMetadataResponse
 	err = json.Unmarshal(buf.Bytes(), &metadataResp)
 	if err != nil {
 		log.Println(fmt.Sprintf("Error updating metadata: %v", err))
@@ -104,11 +104,9 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 		}, nil
 	}
 
-	metadata := metadataResp["metadata"].([]interface{})
-	fmt.Println("current", metadata)
 	var examIds []string
-	for _, item := range metadata {
-		examIds = append(examIds, item.(map[string]interface{})["examId"].(string))
+	for _, item := range metadataResp.Metadata {
+		examIds = append(examIds, item.ExamId)
 	}
 
 	counts, err := getCountsFromService(examIds)
@@ -122,15 +120,15 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	updated := false
-	for _, item := range metadata {
-		if item.(map[string]interface{})["questionCount"] != counts[item.(map[string]interface{})["examId"].(string)] {
-			item.(map[string]interface{})["questionCount"] = counts[item.(map[string]interface{})["examId"].(string)]
+	for _, item := range metadataResp.Metadata {
+		if count, ext := counts[item.ExamId]; ext && item.QuestionCount != count {
+			item.QuestionCount = count
 			updated = true
 		}
 	}
 
 	if updated {
-		jsonBytes, err := json.MarshalIndent(metadata, "", "  ")
+		jsonBytes, err := json.MarshalIndent(metadataResp.Metadata, "", "  ")
 		if err != nil {
 			log.Println(fmt.Sprintf("Error parsing json: %v", err))
 			return events.APIGatewayV2HTTPResponse{
@@ -201,6 +199,8 @@ func getCountsFromService(examIds []string) (map[string]int, error) {
 	if err != nil {
 		return map[string]int{}, err
 	}
+
+	fmt.Println("resp", resp)
 
 	var respPayload models.GetCountResponsePayload
 	err = json.Unmarshal(resp.Payload, &respPayload)
