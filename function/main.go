@@ -126,7 +126,7 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 		if count, exists := counts[item.ExamId]; exists && item.QuestionCount != count {
 			item.QuestionCount = count
 			updated = true
-			fmt.Println(fmt.Sprintf("updating question count from %d to %d", item.QuestionCount, count))
+			fmt.Println(fmt.Sprintf("updating question count for %s from %d to %d", item.ExamId, item.QuestionCount, count))
 		}
 	}
 
