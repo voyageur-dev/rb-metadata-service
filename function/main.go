@@ -97,8 +97,7 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	var metadataResp []models.Metadata
-	err = json.Unmarshal(buf.Bytes(), &metadataResp)
-	if err != nil {
+	if err := json.Unmarshal(buf.Bytes(), &metadataResp); err != nil {
 		log.Println(fmt.Sprintf("Error updating metadata: %v", err))
 		return events.APIGatewayV2HTTPResponse{
 			StatusCode: http.StatusInternalServerError,
@@ -187,37 +186,32 @@ func getMetadataFromS3() (bytes.Buffer, error) {
 }
 
 func getCountsFromService(examIds []string) (map[string]int, error) {
-	payload := map[string]string{
+	payload, err := json.Marshal(map[string]string{
 		"routeKey": getQuestionCountPath,
 		"body":     strings.Join(examIds, ","),
-	}
-	payloadBytes, err := json.Marshal(payload)
+	})
 	if err != nil {
-		return map[string]int{}, err
+		return nil, err
 	}
 
 	resp, err := lambdaClient.Invoke(context.TODO(), &lambdaSDK.InvokeInput{
 		FunctionName:   aws.String(questionServiceArn),
 		InvocationType: "RequestResponse",
-		Payload:        payloadBytes,
+		Payload:        payload,
 	})
 	if err != nil {
-		return map[string]int{}, err
+		return nil, err
 	}
 
 	var respPayloadMap map[string]interface{}
-	err = json.Unmarshal(resp.Payload, &respPayloadMap)
-	if err != nil {
-		return map[string]int{}, err
+	if err := json.Unmarshal(resp.Payload, &respPayloadMap); err != nil {
+		return nil, err
 	}
 
 	var counts map[string]int
-	err = json.Unmarshal([]byte(respPayloadMap["body"].(string)), &counts)
-	if err != nil {
-		return map[string]int{}, err
+	if err := json.Unmarshal([]byte(respPayloadMap["body"].(string)), &counts); err != nil {
+		return nil, err
 	}
-
-	fmt.Println(counts)
 
 	return counts, nil
 }
