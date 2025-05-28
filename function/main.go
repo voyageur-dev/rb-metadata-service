@@ -96,7 +96,7 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 		}, nil
 	}
 
-	var metadataResp models.GetMetadataResponse
+	var metadataResp []models.Metadata
 	err = json.Unmarshal(buf.Bytes(), &metadataResp)
 	if err != nil {
 		log.Println(fmt.Sprintf("Error updating metadata: %v", err))
@@ -107,7 +107,7 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	var examIds []string
-	for _, item := range metadataResp.Metadata {
+	for _, item := range metadataResp {
 		examIds = append(examIds, item.ExamId)
 	}
 
@@ -121,8 +121,8 @@ func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	updated := false
-	for i := range metadataResp.Metadata {
-		item := &metadataResp.Metadata[i]
+	for i := range metadataResp {
+		item := &metadataResp[i]
 		if count, exists := counts[item.ExamId]; exists && item.QuestionCount != count {
 			item.QuestionCount = count
 			updated = true
@@ -211,15 +211,15 @@ func getCountsFromService(examIds []string) (map[string]int, error) {
 		return map[string]int{}, err
 	}
 
-	var getCountResponse models.GetCountResponse
-	err = json.Unmarshal([]byte(respPayloadMap["body"].(string)), &getCountResponse)
+	var counts map[string]int
+	err = json.Unmarshal([]byte(respPayloadMap["body"].(string)), &counts)
 	if err != nil {
 		return map[string]int{}, err
 	}
 
-	fmt.Println(getCountResponse)
+	fmt.Println(counts)
 
-	return getCountResponse.Count, nil
+	return counts, nil
 }
 
 func main() {

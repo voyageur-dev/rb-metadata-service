@@ -1,9 +1,5 @@
 package models
 
-type GetMetadataResponse struct {
-	Metadata []Metadata `json:"metadata"`
-}
-
 type Metadata struct {
 	ExamId        string `json:"examId"`
 	Provider      string `json:"provider"`
