@@ -10,35 +10,28 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	lambdaSDK "github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 )
 
 const (
 	getMetadataPath    = "GET /rb/metadata"
 	updateMetadataPath = "PUT /rb/metadata"
-
-	getQuestionCountPath = "POST /rb/questions/count"
 )
 
 var (
 	metadataBucketName string
 	metadataFileKey    string
-	questionServiceArn string
 
-	s3Client     *s3.Client
-	lambdaClient *lambdaSDK.Client
+	s3Client *s3.Client
 )
 
 func init() {
 	metadataBucketName = os.Getenv("METADATA_BUCKET_NAME")
 	metadataFileKey = os.Getenv("METADATA_FILE_KEY")
-	questionServiceArn = os.Getenv("QUESTION_SERVICE_ARN")
 
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -46,7 +39,6 @@ func init() {
 	}
 
 	s3Client = s3.NewFromConfig(cfg)
-	lambdaClient = lambdaSDK.NewFromConfig(cfg)
 }
 
 func handler(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -57,7 +49,7 @@ func handler(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPRes
 		case getMetadataPath:
 			return getMetadata()
 		case updateMetadataPath:
-			return updateMetadata()
+			return updateMetadata(request)
 		default:
 			return events.APIGatewayV2HTTPResponse{
 				Body:       "Path Not Found",
@@ -84,77 +76,29 @@ func getMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	}, nil
 }
 
-func updateMetadata() (events.APIGatewayV2HTTPResponse, error) {
-	fmt.Println("Update Metadata Begin")
-
-	buf, err := getMetadataFromS3()
-	if err != nil {
-		log.Println(fmt.Sprintf("Error getting metadata: %v", err))
-		return events.APIGatewayV2HTTPResponse{
-			StatusCode: http.StatusInternalServerError,
-			Body:       "Error getting metadata",
-		}, nil
-	}
-
-	var metadataResp []models.Metadata
-	if err := json.Unmarshal(buf.Bytes(), &metadataResp); err != nil {
-		log.Println(fmt.Sprintf("Error updating metadata: %v", err))
+func updateMetadata(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	var metadata []models.Metadata
+	if err := json.Unmarshal([]byte(request.Body), &metadata); err != nil {
+		log.Println(fmt.Sprintf("Error unmarshalling metadata from request body: %v", err))
 		return events.APIGatewayV2HTTPResponse{
 			StatusCode: http.StatusInternalServerError,
 			Body:       "Error updating metadata",
 		}, nil
 	}
 
-	var examIds []string
-	for _, item := range metadataResp {
-		examIds = append(examIds, item.ExamId)
-	}
-
-	counts, err := getCountsFromService(examIds)
+	_, err := s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket:      aws.String(metadataBucketName),
+		Key:         aws.String(metadataFileKey),
+		Body:        bytes.NewReader([]byte(request.Body)),
+		ContentType: aws.String("application/json"),
+	})
 	if err != nil {
-		log.Println(fmt.Sprintf("Error getting count from rb-question-service: %v", err))
+		log.Println(fmt.Sprintf("Error upload to s3: %v", err))
 		return events.APIGatewayV2HTTPResponse{
 			StatusCode: http.StatusInternalServerError,
 			Body:       "Error updating metadata",
 		}, nil
 	}
-
-	updated := false
-	for i := range metadataResp {
-		item := &metadataResp[i]
-		if count, exists := counts[item.ExamId]; exists && item.QuestionCount != count {
-			fmt.Println(fmt.Sprintf("updating question count for %s from %d to %d", item.ExamId, item.QuestionCount, count))
-			item.QuestionCount = count
-			updated = true
-		}
-	}
-
-	if updated {
-		jsonBytes, err := json.MarshalIndent(metadataResp, "", "  ")
-		if err != nil {
-			log.Println(fmt.Sprintf("Error parsing json: %v", err))
-			return events.APIGatewayV2HTTPResponse{
-				StatusCode: http.StatusInternalServerError,
-				Body:       "Error updating metadata",
-			}, nil
-		}
-
-		_, err = s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
-			Bucket:      aws.String(metadataBucketName),
-			Key:         aws.String(metadataFileKey),
-			Body:        bytes.NewReader(jsonBytes),
-			ContentType: aws.String("application/json"),
-		})
-		if err != nil {
-			log.Println(fmt.Sprintf("Error upload to s3: %v", err))
-			return events.APIGatewayV2HTTPResponse{
-				StatusCode: http.StatusInternalServerError,
-				Body:       "Error updating metadata",
-			}, nil
-		}
-	}
-
-	fmt.Println("Update Metadata End")
 
 	return events.APIGatewayV2HTTPResponse{
 		StatusCode: http.StatusOK,
@@ -183,37 +127,6 @@ func getMetadataFromS3() (bytes.Buffer, error) {
 	}
 
 	return *buf, nil
-}
-
-func getCountsFromService(examIds []string) (map[string]int, error) {
-	payload, err := json.Marshal(map[string]string{
-		"routeKey": getQuestionCountPath,
-		"body":     strings.Join(examIds, ","),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := lambdaClient.Invoke(context.TODO(), &lambdaSDK.InvokeInput{
-		FunctionName:   aws.String(questionServiceArn),
-		InvocationType: "RequestResponse",
-		Payload:        payload,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var respPayloadMap map[string]interface{}
-	if err := json.Unmarshal(resp.Payload, &respPayloadMap); err != nil {
-		return nil, err
-	}
-
-	var counts map[string]int
-	if err := json.Unmarshal([]byte(respPayloadMap["body"].(string)), &counts); err != nil {
-		return nil, err
-	}
-
-	return counts, nil
 }
 
 func main() {
