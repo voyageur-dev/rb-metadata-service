@@ -6,15 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"function/models"
+	"log"
+	"net/http"
+	"os"
+
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"io"
-	"log"
-	"net/http"
-	"os"
 )
 
 const (
@@ -25,13 +27,16 @@ const (
 var (
 	metadataBucketName string
 	metadataFileKey    string
+	metadataTableName  string
 
-	s3Client *s3.Client
+	s3Client     *s3.Client
+	dynamoClient *dynamodb.Client
 )
 
 func init() {
 	metadataBucketName = os.Getenv("METADATA_BUCKET_NAME")
 	metadataFileKey = os.Getenv("METADATA_FILE_KEY")
+	metadataTableName = os.Getenv("METADATA_TABLE_NAME")
 
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
@@ -39,6 +44,7 @@ func init() {
 	}
 
 	s3Client = s3.NewFromConfig(cfg)
+	dynamoClient = dynamodb.NewFromConfig(cfg)
 }
 
 func handler(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -60,9 +66,18 @@ func handler(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPRes
 }
 
 func getMetadata() (events.APIGatewayV2HTTPResponse, error) {
-	buf, err := getMetadataFromS3()
+	metadata, err := getMetadataFromDynamoDB()
 	if err != nil {
 		log.Println(fmt.Sprintf("Error getting metadata: %v", err))
+		return events.APIGatewayV2HTTPResponse{
+			StatusCode: http.StatusInternalServerError,
+			Body:       "Error getting metadata",
+		}, nil
+	}
+
+	body, err := json.Marshal(metadata)
+	if err != nil {
+		log.Println(fmt.Sprintf("Error marshalling metadata: %v", err))
 		return events.APIGatewayV2HTTPResponse{
 			StatusCode: http.StatusInternalServerError,
 			Body:       "Error getting metadata",
@@ -72,7 +87,7 @@ func getMetadata() (events.APIGatewayV2HTTPResponse, error) {
 	return events.APIGatewayV2HTTPResponse{
 		StatusCode: http.StatusOK,
 		Headers:    map[string]string{"Content-Type": "application/json"},
-		Body:       buf.String(),
+		Body:       string(body),
 	}, nil
 }
 
@@ -105,28 +120,21 @@ func updateMetadata(request events.APIGatewayV2HTTPRequest) (events.APIGatewayV2
 	}, nil
 }
 
-func getMetadataFromS3() (bytes.Buffer, error) {
-	metadata, err := s3Client.GetObject(context.TODO(), &s3.GetObjectInput{
-		Bucket: aws.String(metadataBucketName),
-		Key:    aws.String(metadataFileKey),
+func getMetadataFromDynamoDB() ([]models.Metadata, error) {
+	out, err := dynamoClient.Scan(context.TODO(), &dynamodb.ScanInput{
+		TableName: aws.String(metadataTableName),
 	})
 	if err != nil {
-		return bytes.Buffer{}, err
+		return nil, err
 	}
 
-	defer func() {
-		if err := metadata.Body.Close(); err != nil {
-			log.Printf("error closing S3 body: %v", err)
-		}
-	}()
-
-	buf := new(bytes.Buffer)
-	_, err = io.Copy(buf, metadata.Body)
+	var metadata []models.Metadata
+	err = attributevalue.UnmarshalListOfMaps(out.Items, &metadata)
 	if err != nil {
-		return bytes.Buffer{}, err
+		return nil, err
 	}
 
-	return *buf, nil
+	return metadata, nil
 }
 
 func main() {
