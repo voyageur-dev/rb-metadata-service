@@ -2,8 +2,8 @@ package models
 
 type Metadata struct {
 	ExamId        string `json:"examId"`
-	Provider      string `json:"provider"`
-	Name          string `json:"name"`
+	ProviderId    string `json:"providerId"`
+	ExamName      string `json:"examName"`
 	SourceCount   int    `json:"sourceCount"`
 	QuestionCount int    `json:"questionCount"`
 	ExamCount     int    `json:"examCount"`
